@@ -1,19 +1,29 @@
 """VibeVoice TTS FastAPI server with Piper fallback."""
 
-import os
-import io
-import time
+from __future__ import annotations
+
 import copy
-import torch
-import soundfile as sf
+import io
+import os
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+import soundfile as sf
+import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-MODEL_PATH = os.environ.get("VIBEVOICE_MODEL_PATH", "models/vibevoice-realtime-0.5b")
+# Resolve paths relative to project root (parent of tts/) so the server works
+# regardless of the directory it's started from.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MODEL_PATH = os.environ.get(
+    "VIBEVOICE_MODEL_PATH", str(PROJECT_ROOT / "models" / "vibevoice-realtime-0.5b")
+)
 VOICE_PATH = os.environ.get(
-    "VIBEVOICE_VOICE_PATH", "voices/streaming_model/en-Emma_woman.pt"
+    "VIBEVOICE_VOICE_PATH",
+    str(PROJECT_ROOT / "voices" / "streaming_model" / "en-Emma_woman.pt"),
 )
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
 

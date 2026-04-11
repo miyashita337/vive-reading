@@ -128,25 +128,57 @@
 
   <script>
     const API = location.origin;
+    const WS_URL = location.origin.replace(/^http/, 'ws') + '/ws';
+
     let audioCtx = null;
+    let audioEl = null;
     let isPlaying = false;
     let playingMsgId = null;
+    let currentMessages = [];   // cached messages for playback queue
+    let currentPlayIndex = -1;  // index into currentMessages
+    let ws = null;
+    let playbackAbortToken = 0; // increments on stop to abort in-flight playback
 
     // iOS Safari autoplay unlock
     document.getElementById('init-btn').addEventListener('click', () => {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       audioCtx.resume();
+      audioEl = new Audio();
+      audioEl.addEventListener('ended', onAudioEnded);
+      audioEl.addEventListener('error', (e) => console.error('Audio error:', e));
       document.getElementById('init-overlay').classList.add('hidden');
       loadMessages();
-      // Poll for new messages every 5s
-      setInterval(loadMessages, 5000);
+      connectWs();
     });
+
+    function connectWs() {
+      try {
+        ws = new WebSocket(WS_URL);
+        ws.addEventListener('open', () => console.log('WS connected'));
+        ws.addEventListener('message', (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.type === 'new_message') {
+              loadMessages();
+            }
+          } catch {}
+        });
+        ws.addEventListener('close', () => {
+          console.log('WS closed, reconnecting in 3s');
+          setTimeout(connectWs, 3000);
+        });
+      } catch (e) {
+        console.error('WS connect failed:', e);
+      }
+    }
 
     async function loadMessages() {
       try {
         const res = await fetch(`${API}/api/messages`);
         const messages = await res.json();
-        renderMessages(messages.reverse()); // newest at bottom
+        // Server returns newest first, reverse for oldest-first display
+        currentMessages = messages.slice().reverse();
+        renderMessages(currentMessages);
       } catch (e) {
         console.error('Failed to load messages:', e);
       }
@@ -173,29 +205,79 @@
     }
 
     async function playFrom(fromId) {
+      // Abort any existing playback
+      playbackAbortToken++;
+      const myToken = playbackAbortToken;
+
       try {
         await fetch(`${API}/api/play`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ from_id: fromId }),
         });
-        isPlaying = true;
-        playingMsgId = fromId;
-        updateUI();
       } catch (e) {
-        console.error('Play failed:', e);
+        console.error('Play API failed:', e);
       }
+
+      // Find index in current list
+      currentPlayIndex = currentMessages.findIndex(m => m.id === fromId);
+      if (currentPlayIndex < 0) {
+        console.warn('Message not in current list:', fromId);
+        return;
+      }
+
+      isPlaying = true;
+      playNext(myToken);
     }
 
-    document.getElementById('stop-btn').addEventListener('click', async () => {
-      try {
-        await fetch(`${API}/api/stop`, { method: 'POST' });
+    async function playNext(token) {
+      // Abort if newer play was issued
+      if (token !== playbackAbortToken) return;
+      if (currentPlayIndex >= currentMessages.length) {
+        // Done
         isPlaying = false;
         playingMsgId = null;
         updateUI();
-      } catch (e) {
-        console.error('Stop failed:', e);
+        return;
       }
+
+      const msg = currentMessages[currentPlayIndex];
+      playingMsgId = msg.id;
+      updateUI();
+
+      try {
+        const audioUrl = `${API}/api/audio/${msg.id}`;
+        audioEl.src = audioUrl;
+        await audioEl.play();
+      } catch (e) {
+        console.error(`Failed to play message ${msg.id}:`, e);
+        // Skip to next
+        currentPlayIndex++;
+        playNext(token);
+      }
+    }
+
+    function onAudioEnded() {
+      // Move to next message in queue
+      currentPlayIndex++;
+      playNext(playbackAbortToken);
+    }
+
+    document.getElementById('stop-btn').addEventListener('click', async () => {
+      playbackAbortToken++;
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.src = '';
+      }
+      try {
+        await fetch(`${API}/api/stop`, { method: 'POST' });
+      } catch (e) {
+        console.error('Stop API failed:', e);
+      }
+      isPlaying = false;
+      playingMsgId = null;
+      currentPlayIndex = -1;
+      updateUI();
     });
 
     function updateUI() {
