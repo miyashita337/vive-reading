@@ -43,7 +43,7 @@ set -e
 # Basic 認証を渡す。こうすると:
 #   - `ps` / /proc/PID/cmdline にトークンが載らない
 #   - .git/config にも残らない（env は clone プロセス内でのみ有効）
-if [ ! -d "$AGENT_BASE_DIR" ]; then
+if [ ! -d "$AGENT_BASE_DIR/.git" ]; then
   log "step: clone (timeout=${CLONE_TIMEOUT_SEC}s)"
   auth_header="Authorization: Basic $(printf '%s' "x-access-token:${GH_TOKEN}" | base64 | tr -d '\n')"
   if command -v timeout >/dev/null 2>&1; then
