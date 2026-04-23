@@ -1,0 +1,10 @@
+node_modules/
+.venv/
+models/
+voices/
+*.pyc
+__pycache__/
+dist/
+.env
+*.wav
+*.mp3
